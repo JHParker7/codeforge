@@ -1,6 +1,7 @@
 package main
 
 import (
+	"codeforge/src/gatekeeper/routes"
 	"log"
 	"net/http"
 
@@ -28,6 +29,8 @@ func main() {
 		c.Header("Permissions-Policy", "geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()")
 		c.Next()
 	})
+
+	router.PUT("/signup", routes.PutUser)
 
 	err := router.Run("0.0.0.0:8081")
 	if err != nil {

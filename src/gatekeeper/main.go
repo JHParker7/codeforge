@@ -30,10 +30,19 @@ func main() {
 		c.Next()
 	})
 
-	router.PUT("/signup", routes.PutUser)
+	router.POST("/signup", routes.PostUser)
+	router.GET("/token", routes.GetToken)
+	router.GET("/signin", routes.GetSignIn)
+
+	authorized := router.Group("/")
+	authorized.PUT("/user/:id", routes.PutUser)
+	authorized.DELETE("/user/:id", routes.DeleteUser)
+	authorized.GET("/user/:id", routes.GetUser)
 
 	err := router.Run("0.0.0.0:8081")
 	if err != nil {
 		log.Println("failed to start api")
 	}
 }
+
+// use graphql for the addons using role to restrict data access

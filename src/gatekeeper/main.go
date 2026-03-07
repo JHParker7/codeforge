@@ -35,6 +35,7 @@ func main() {
 	router.GET("/signin", routes.GetSignIn)
 
 	authorized := router.Group("/")
+	authorized.Use(routes.Authenticate)
 	authorized.PUT("/user/:id", routes.PutUser)
 	authorized.DELETE("/user/:id", routes.DeleteUser)
 	authorized.GET("/user/:id", routes.GetUser)

@@ -3,21 +3,27 @@ package database
 import (
 	"codeforge/src/gatekeeper/types"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/argon2"
 )
 
 func GetUser(id string) types.User {
 	conn := ConnectDB("codeforge")
 	var user types.User
-	err := conn.QueryRow(context.Background(), "select *  from auth.users where id = $1", id).Scan(&user)
+	slog.Debug(id)
+	err := conn.QueryRow(context.Background(), "select id, username, email, created_at, updated_at,role_id, team_id, org_id from auth.users where id=$1 and active=true", id).Scan(&user.ID, &user.Username, &user.Email, &user.CreatedAt, &user.UpdatedAt, &user.RoleID, &user.TeamID, &user.OrgID)
 	if err != nil && err != pgx.ErrNoRows {
-		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "QueryRow failed | GetUser | %v\n", err)
 		os.Exit(1)
+	}
+	if err == pgx.ErrNoRows {
+		slog.Info("no matching user in database", "id", id)
 	}
 	return user
 }
@@ -64,4 +70,33 @@ func CreateUser(user types.User) (string, error) {
 		log.Fatal(err)
 	}
 	return user.ID, nil
+}
+
+func AuthUser(Username string, Password string) (string, error) {
+	var err error
+
+	conn := ConnectDB("codeforge")
+
+	var Salt string
+	var id string
+
+	err = conn.QueryRow(context.Background(), "select salt from auth.users where username=$1", Username).Scan(&Salt)
+	if err != nil && err != pgx.ErrNoRows {
+		log.Println("QueryRow failed get user via username | AuthUser | ")
+		return "", err
+	}
+
+	PasswordHash := hex.EncodeToString(argon2.IDKey([]byte(Password), []byte(Salt), 1, 64*1024, 4, 32)[:])
+
+	err = conn.QueryRow(context.Background(), "select id from auth.users where username=$1 and password=$2", Username, PasswordHash).Scan(&id)
+	if err != nil && err != pgx.ErrNoRows {
+		log.Println("QueryRow failed check username and password | AuthUser")
+		return "", err
+	}
+
+	if id == "" {
+		return "incorrect username or password", nil
+	}
+
+	return id, nil
 }

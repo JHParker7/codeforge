@@ -1,10 +1,10 @@
 services:
-  codeforge_core:
-    image: codeforge_gatekeeper:0.0.1
-    environment:
-      DATABASE_URL: postgresql://postgres:test@database:5432
-    ports:
-      - "8081:8081"
+  # codeforge_core:
+  #   image: codeforge_gatekeeper:0.0.2
+  #   environment:
+  #     DATABASE_URL: postgresql://postgres:test@database:5432
+  #   ports:
+  #     - "8081:8081"
   database:
     image: public.ecr.aws/docker/library/postgres:14.21-alpine3.23
     restart: always
@@ -12,5 +12,7 @@ services:
       POSTGRES_PASSWORD: test
     expose:
       - 5432
+    ports:
+      - "5432:5432"
     volumes:
       - ../../sql/auth:/docker-entrypoint-initdb.d

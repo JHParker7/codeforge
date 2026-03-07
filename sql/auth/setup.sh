@@ -75,8 +75,9 @@ CREATE TABLE auth.hosts (
 CREATE TABLE auth.sessions (
 	id varchar(64) NOT NULL,
 	created_at timestamp NULL,
-	jwt varchar(2048) NULL,
-	expires_at timestamp NULL,
+	updated_at timestamp NULL,
+  expires_at timestamp NULL,
+	token varchar(2048) NULL,
 	user_id varchar(64) NULL,
 	pub_key bytea NULL,
 	CONSTRAINT sessions_pkey PRIMARY KEY (id)

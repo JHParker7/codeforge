@@ -5,6 +5,7 @@ import (
 	"codeforge/src/gatekeeper/types"
 	"encoding/hex"
 	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -41,12 +42,12 @@ func PostUser(c *gin.Context) {
 
 	newUser.Password = hex.EncodeToString(argon2.IDKey([]byte(userRequest.Password), []byte(newUser.Salt), 1, 64*1024, 4, 32)[:])
 
-	hash, err := uuid.NewV7()
+	UUID, err := uuid.NewV7()
 	if err != nil {
-		log.Fatal("uuid failed to generate")
+		slog.Error("uuid generation for user failed error:", "error", err.Error())
 	}
 
-	newUser.ID = hash.String()
+	newUser.ID = UUID.String()
 
 	userResponse, err := database.CreateUser(newUser)
 

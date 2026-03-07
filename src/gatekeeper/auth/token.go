@@ -4,12 +4,12 @@ import (
 	"codeforge/src/gatekeeper/types"
 	"crypto/ed25519"
 	"errors"
-	"log"
+	"log/slog"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func CreateJWT(user types.User, exp jwt.NumericDate, privateKey ed25519.PrivateKey) (string, error) {
+func CreateJWT(user types.User, exp *jwt.NumericDate, privateKey ed25519.PrivateKey) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{
 		"exp":        exp,
 		"authorized": true,
@@ -45,8 +45,18 @@ func CheckJWT(token string, user types.User, pub ed25519.PublicKey) (types.JWTCl
 		return JWTClaim, err
 	}
 
-	if JWTClaim.Email != user.Email || JWTClaim.Username != user.Email || JWTClaim.ID != user.ID {
-		log.Println("claim doesn't match user")
+	if JWTClaim.Email != user.Email {
+		slog.Info("email doesn't match", "target", user.Email, "is", JWTClaim.Email)
+		JWTClaim.Authorized = false
+		return JWTClaim, errors.New("claim doesn't match user")
+	}
+	if JWTClaim.Username != user.Username {
+		slog.Info("username doesn't match", "target", user.Username, "is", JWTClaim.Username)
+		JWTClaim.Authorized = false
+		return JWTClaim, errors.New("claim doesn't match user")
+	}
+	if JWTClaim.ID != user.ID {
+		slog.Info("id doesn't match", "target", user.ID, "is", JWTClaim.ID)
 		JWTClaim.Authorized = false
 		return JWTClaim, errors.New("claim doesn't match user")
 	}

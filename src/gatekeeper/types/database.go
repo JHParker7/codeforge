@@ -54,7 +54,9 @@ type Session struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	JWT       string    `json:"jwt"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Token     string    `json:"token"`
+	Type      string    `json:"type"`
 	UserID    string    `json:"user_id"`
 	PubKey    []byte    `json:"pub_key"`
 }

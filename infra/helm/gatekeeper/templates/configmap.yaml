@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gatekeeper.fullname" . }}-db-init
+  labels:
+    {{- include "gatekeeper.labels" . | nindent 4 }}
+data:
+  init.sql: |
+    CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION postgres;
+
+    CREATE TABLE IF NOT EXISTS auth.orgs (
+      id varchar(64) NOT NULL,
+      created_at timestamp NULL,
+      updated_at timestamp NULL,
+      hash_config json NULL,
+      CONSTRAINT orgs_pkey PRIMARY KEY (id)
+    );
+
+    CREATE TABLE IF NOT EXISTS auth.roles (
+      id varchar(64) NOT NULL,
+      created_at timestamp NULL,
+      updated_at timestamp NULL,
+      "permissions" json NULL,
+      CONSTRAINT roles_pkey PRIMARY KEY (id)
+    );
+
+    CREATE TABLE IF NOT EXISTS auth.services (
+      "name" varchar(64) NOT NULL,
+      icon_path varchar(64) NULL,
+      "path" varchar(64) NULL,
+      CONSTRAINT services_pkey PRIMARY KEY (name)
+    );
+
+    CREATE TABLE IF NOT EXISTS auth.hosts (
+      id varchar(64) NOT NULL,
+      hostname varchar(64) NULL,
+      ip varchar(64) NULL,
+      port int4 NULL,
+      service varchar(64) NULL,
+      CONSTRAINT hosts_pkey PRIMARY KEY (id),
+      CONSTRAINT hosts_service_fkey FOREIGN KEY (service) REFERENCES auth.services("name")
+    );
+
+    CREATE TABLE IF NOT EXISTS auth.sessions (
+      id varchar(64) NOT NULL,
+      created_at timestamp NULL,
+      updated_at timestamp NULL,
+      expires_at timestamp NULL,
+      token varchar(2048) NULL,
+      user_id varchar(64) NULL,
+      pub_key bytea NULL,
+      CONSTRAINT sessions_pkey PRIMARY KEY (id)
+    );
+
+    CREATE TABLE IF NOT EXISTS auth.teams (
+      id varchar(64) NOT NULL,
+      created_at timestamp NULL,
+      updated_at timestamp NULL,
+      "owner" varchar(64) NULL,
+      org_id varchar(64) NULL,
+      CONSTRAINT teams_pkey PRIMARY KEY (id)
+    );
+
+    CREATE TABLE IF NOT EXISTS auth.users (
+      id varchar(64) NOT NULL,
+      username varchar(64) NULL,
+      role_id varchar(64) NULL,
+      "password" varchar(128) NULL,
+      "salt" varchar(128) NULL,
+      email varchar(64) NULL,
+      created_at timestamp NULL,
+      updated_at timestamp NULL,
+      team_id varchar(64) NULL,
+      org_id varchar(64) NULL,
+      active bool NULL,
+      CONSTRAINT users_pkey PRIMARY KEY (id)
+    );
+
+    ALTER TABLE auth.sessions ADD CONSTRAINT IF NOT EXISTS sessions_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES auth.users(id);
+
+    ALTER TABLE auth.teams ADD CONSTRAINT IF NOT EXISTS teams_org_id_fkey
+      FOREIGN KEY (org_id) REFERENCES auth.orgs(id);
+    ALTER TABLE auth.teams ADD CONSTRAINT IF NOT EXISTS teams_owner_fkey
+      FOREIGN KEY ("owner") REFERENCES auth.users(id);
+
+    ALTER TABLE auth.users ADD CONSTRAINT IF NOT EXISTS users_org_id_fkey
+      FOREIGN KEY (org_id) REFERENCES auth.orgs(id);
+    ALTER TABLE auth.users ADD CONSTRAINT IF NOT EXISTS users_role_id_fkey
+      FOREIGN KEY (role_id) REFERENCES auth.roles(id);
+    ALTER TABLE auth.users ADD CONSTRAINT IF NOT EXISTS users_team_id_fkey
+      FOREIGN KEY (team_id) REFERENCES auth.teams(id);

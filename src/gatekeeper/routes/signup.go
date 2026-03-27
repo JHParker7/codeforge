@@ -1,8 +1,10 @@
 package routes
 
 import (
+	"codeforge/src/gatekeeper/auth"
 	"codeforge/src/gatekeeper/database"
 	"codeforge/src/gatekeeper/types"
+	"database/sql"
 	"encoding/hex"
 	"log"
 	"log/slog"
@@ -42,14 +44,28 @@ func PostUser(c *gin.Context) {
 
 	newUser.Password = hex.EncodeToString(argon2.IDKey([]byte(userRequest.Password), []byte(newUser.Salt), 1, 64*1024, 4, 32)[:])
 
-	UUID, err := uuid.NewV7()
+	user_UUID, err := uuid.NewV7()
 	if err != nil {
 		slog.Error("uuid generation for user failed error:", "error", err.Error())
 	}
 
-	newUser.ID = UUID.String()
+	newUser.ID = user_UUID.String()
+
+	role := auth.CreateEmptyUserRole(newUser)
+
+	// Create the role first; users.role_id is a FK to roles.id so the role
+	// must exist before the user row references it.
+	_, err = database.CreateRole(role)
+	if err != nil {
+		slog.Error("failed to add role to database:", "error", err.Error())
+	} else {
+		newUser.RoleID = sql.NullString{String: role.ID, Valid: true}
+	}
 
 	userResponse, err := database.CreateUser(newUser)
+	if err != nil {
+		slog.Error("failed to add user to database:", "error", err.Error())
+	}
 
 	var response TokenResponse
 	response.Reason = userResponse
@@ -58,10 +74,10 @@ func PostUser(c *gin.Context) {
 		response.Reason = userResponse
 		response.UserCreated = false
 		c.JSON(http.StatusOK, response)
-	} else {
-		response.Reason = "user created"
-		response.UserCreated = true
-		c.JSON(http.StatusOK, response)
-
+		return
 	}
+
+	response.Reason = "user created"
+	response.UserCreated = true
+	c.JSON(http.StatusOK, response)
 }

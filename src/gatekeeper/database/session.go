@@ -3,6 +3,7 @@ package database
 import (
 	"codeforge/src/gatekeeper/types"
 	"context"
+	"errors"
 	"log/slog"
 )
 
@@ -26,5 +27,8 @@ func GetSession(token string) (types.Session, error) {
 	slog.Info("getting session info")
 	conn.QueryRow(context.Background(), "SELECT id, created_at, updated_at, token, expires_at, user_id, pub_key FROM auth.sessions WHERE token=$1", token).Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt, &session.Token, &session.ExpiresAt, &session.UserID, &session.PubKey)
 	slog.Info("session_id", "uuid", session.ID)
+	if session.ID == "" {
+		return session, errors.New("no session found")
+	}
 	return session, nil
 }

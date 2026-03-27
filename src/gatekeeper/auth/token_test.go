@@ -3,173 +3,191 @@ package auth
 import (
 	"codeforge/src/gatekeeper/types"
 	"crypto/ed25519"
-	"crypto/x509"
-	"encoding/pem"
-	"errors"
-	"log"
-	"os"
+	"crypto/rand"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func TestTemp(t *testing.T) {
-	var TestUser types.User
-
-	privateKeyPEM, _ := os.ReadFile("private.pem")
-	block, _ := pem.Decode(privateKeyPEM)
-	privKey, _ := x509.ParsePKCS8PrivateKey(block.Bytes)
-	priv := privKey.(ed25519.PrivateKey)
-
-	// TestUuid, _ := uuid.NewV7()
-
-	TestTime := time.Date(2026, time.February, 10, 10, 10, 10, 10, time.UTC)
-
-	TestUser.Active = true
-	TestUser.CreatedAt = TestTime
-	TestUser.UpdatedAt = TestTime
-	TestUser.Email = "test@test.com"
-	TestUser.ID = "019c5df7-7e21-73fd-9641-d0e9208a927e"
-	TestUser.Username = "test"
-
-	var TestExp jwt.NumericDate
-
-	TestExp.Time = TestTime.Add(30 * time.Minute)
-
-	token, err := CreateJWT(TestUser, TestExp, priv)
+func newTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		log.Println("error is not nil")
-		t.Fail()
+		t.Fatalf("failed to generate key pair: %v", err)
 	}
+	return pub, priv
+}
 
-	if token != "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhdXRob3JpemVkIjp0cnVlLCJlbWFpbCI6InRlc3RAdGVzdC5jb20iLCJleHAiOjE3NzA3MjAwMTAsImlkIjoiMDE5YzVkZjctN2UyMS03M2ZkLTk2NDEtZDBlOTIwOGE5MjdlIiwidXNlcm5hbWUiOiJ0ZXN0In0.P89qxi7tp7Opzw2S0-2LkbTUQ-Aredb4KjtjGn7R-oPi8bte1ArSnMdaG7IljIM8onsI5rGHyyfp1IBG9sUWCQ" {
-		log.Println("jwt is wrong:")
-		log.Println(token)
-		t.Fail()
-	}
-	ParsedToken, _ := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
-		return priv.Public(), nil
-	})
+var testUser = types.User{
+	ID:       "019c5df7-7e21-73fd-9641-d0e9208a927e",
+	Username: "testuser",
+	Email:    "test@example.com",
+}
 
-	if ParsedToken.Valid != false {
-		log.Println("token should be expired")
-		t.Fail()
-	}
+// --- CreateJWT ---
 
-	token, err = CreateJWT(TestUser, TestExp, priv)
+func TestCreateJWT_ReturnsNonEmptyToken(t *testing.T) {
+	_, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
+
+	token, err := CreateJWT(testUser, exp, priv)
 	if err != nil {
-		log.Println("error is not nil")
-		t.Fail()
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	ParsedToken, err = jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
-		return priv.Public(), nil
-	})
-	if err != nil {
-		log.Println(err)
-		log.Println("token not vaild")
-
-	}
-
-	claims := ParsedToken.Claims.(jwt.MapClaims)
-
-	exp := claims["exp"].(float64)
-	authorized := claims["authorized"].(bool)
-	username := claims["username"].(string)
-	email := claims["email"].(string)
-	id := claims["id"].(string)
-
-	if exp != float64(TestExp.Unix()) {
-		println("exp is wrong")
-		t.Fail()
-	}
-	if authorized != true {
-		println("claim not authorized")
-		t.Fail()
-	}
-	if username != "test" {
-		println("username is wrong")
-		t.Fail()
-	}
-	if email != "test@test.com" {
-		println("email is wrong")
-		t.Fail()
-	}
-	if id != TestUser.ID {
-		println("id is wrong")
+	if token == "" {
+		t.Error("expected non-empty token string")
 	}
 }
 
-func TestCheckJWT(t *testing.T) {
-	TestToken := "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhdXRob3JpemVkIjp0cnVlLCJlbWFpbCI6InRlc3RAdGVzdC5jb20iLCJleHAiOjE3NzA3MjAwMTAsImlkIjoiMDE5YzVkZjctN2UyMS03M2ZkLTk2NDEtZDBlOTIwOGE5MjdlIiwidXNlcm5hbWUiOiJ0ZXN0In0.P89qxi7tp7Opzw2S0-2LkbTUQ-Aredb4KjtjGn7R-oPi8bte1ArSnMdaG7IljIM8onsI5rGHyyfp1IBG9sUWCQ"
+func TestCreateJWT_ClaimsAreCorrect(t *testing.T) {
+	_, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
 
-	privateKeyPEM, _ := os.ReadFile("private.pem")
-	block, _ := pem.Decode(privateKeyPEM)
-	privKey, _ := x509.ParsePKCS8PrivateKey(block.Bytes)
-	priv := privKey.(ed25519.PrivateKey)
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
 
-	var TestUser types.User
+	parsed, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		return priv.Public(), nil
+	})
+	if err != nil {
+		t.Fatalf("failed to parse token: %v", err)
+	}
 
-	TestTime := time.Date(2026, time.February, 10, 10, 10, 10, 10, time.UTC)
+	claims := parsed.Claims.(jwt.MapClaims)
+	if claims["username"] != testUser.Username {
+		t.Errorf("username: got %v, want %v", claims["username"], testUser.Username)
+	}
+	if claims["email"] != testUser.Email {
+		t.Errorf("email: got %v, want %v", claims["email"], testUser.Email)
+	}
+	if claims["id"] != testUser.ID {
+		t.Errorf("id: got %v, want %v", claims["id"], testUser.ID)
+	}
+	if claims["authorized"] != true {
+		t.Errorf("authorized: got %v, want true", claims["authorized"])
+	}
+	if claims["exp"].(float64) != float64(exp.Unix()) {
+		t.Errorf("exp: got %v, want %v", claims["exp"], float64(exp.Unix()))
+	}
+}
 
-	TestUser.Active = true
-	TestUser.CreatedAt = TestTime
-	TestUser.UpdatedAt = TestTime
-	TestUser.Email = "test@test.com"
-	TestUser.ID = "019c5df7-7e21-73fd-9641-d0e9208a927e"
-	TestUser.Username = "test"
+func TestCreateJWT_SignatureVerifiableWithPublicKey(t *testing.T) {
+	pub, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
 
-	var TestExp jwt.NumericDate
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
 
-	TestExp.Time = TestTime.Add(30 * time.Minute)
+	_, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		return pub, nil
+	})
+	if err != nil {
+		t.Errorf("token should verify with matching public key: %v", err)
+	}
+}
 
-	Claim, err := CheckJWT(TestToken, TestUser, priv)
+func TestCreateJWT_ExpiredTokenIsRejected(t *testing.T) {
+	_, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(-time.Minute))
+
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
+
+	parsed, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		return priv.Public(), nil
+	})
 	if err == nil {
-		println("token should be expired")
-		t.Fail()
+		t.Error("expected error for expired token, got nil")
 	}
+	if parsed != nil && parsed.Valid {
+		t.Error("expired token should not be marked valid")
+	}
+}
 
-	if Claim.Exp != float64(TestExp.Unix()) {
-		println("exp is wrong:")
-		println(Claim.Exp)
-		println(float64(TestExp.Unix()))
-		t.Fail()
-	}
-	if Claim.Authorized != true {
-		println("claim not authorized")
-		t.Fail()
-	}
-	if Claim.Username != "test" {
-		println("username is wrong")
-		t.Fail()
-	}
-	if Claim.Email != "test@test.com" {
-		println("email is wrong")
-		t.Fail()
-	}
-	if Claim.ID != TestUser.ID {
-		println("id is wrong")
-	}
+// --- CheckJWT ---
 
-	TestUser.Username = "test1"
+func TestCheckJWT_ValidToken(t *testing.T) {
+	pub, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
 
-	Claim, err = CheckJWT(TestToken, TestUser, priv)
-	if err != errors.New("claim doesn't match user") && Claim.Authorized != false {
-		println("claim should be invalid")
+	claim, err := CheckJWT(tokenStr, testUser, pub)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	TestUser.Email = "fail@test.com"
-
-	Claim, err = CheckJWT(TestToken, TestUser, priv)
-	if err != errors.New("claim doesn't match user") && Claim.Authorized != false {
-		println("claim should be invalid")
+	if !claim.Authorized {
+		t.Error("expected Authorized to be true")
 	}
+	if claim.Username != testUser.Username {
+		t.Errorf("Username: got %v, want %v", claim.Username, testUser.Username)
+	}
+	if claim.Email != testUser.Email {
+		t.Errorf("Email: got %v, want %v", claim.Email, testUser.Email)
+	}
+	if claim.ID != testUser.ID {
+		t.Errorf("ID: got %v, want %v", claim.ID, testUser.ID)
+	}
+	if claim.Exp != float64(exp.Unix()) {
+		t.Errorf("Exp: got %v, want %v", claim.Exp, float64(exp.Unix()))
+	}
+}
 
-	TestUser.ID = "test"
+func TestCheckJWT_ExpiredToken(t *testing.T) {
+	pub, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(-time.Minute))
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
 
-	Claim, err = CheckJWT(TestToken, TestUser, priv)
-	if err != errors.New("claim doesn't match user") && Claim.Authorized != false {
-		println("claim should be invalid")
+	_, err := CheckJWT(tokenStr, testUser, pub)
+	if err == nil {
+		t.Error("expected error for expired token")
+	}
+}
+
+func TestCheckJWT_EmailMismatch(t *testing.T) {
+	pub, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
+
+	wrongUser := testUser
+	wrongUser.Email = "other@example.com"
+
+	claim, err := CheckJWT(tokenStr, wrongUser, pub)
+	if err == nil {
+		t.Error("expected error for email mismatch")
+	}
+	if claim.Authorized {
+		t.Error("expected Authorized to be false on email mismatch")
+	}
+}
+
+func TestCheckJWT_UsernameMismatch(t *testing.T) {
+	pub, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
+
+	wrongUser := testUser
+	wrongUser.Username = "otheruser"
+
+	claim, err := CheckJWT(tokenStr, wrongUser, pub)
+	if err == nil {
+		t.Error("expected error for username mismatch")
+	}
+	if claim.Authorized {
+		t.Error("expected Authorized to be false on username mismatch")
+	}
+}
+
+func TestCheckJWT_IDMismatch(t *testing.T) {
+	pub, priv := newTestKeyPair(t)
+	exp := jwt.NewNumericDate(time.Now().Add(time.Hour))
+	tokenStr, _ := CreateJWT(testUser, exp, priv)
+
+	wrongUser := testUser
+	wrongUser.ID = "00000000-0000-0000-0000-000000000000"
+
+	claim, err := CheckJWT(tokenStr, wrongUser, pub)
+	if err == nil {
+		t.Error("expected error for ID mismatch")
+	}
+	if claim.Authorized {
+		t.Error("expected Authorized to be false on ID mismatch")
 	}
 }

@@ -72,6 +72,38 @@ func CreateUser(user types.User) (string, error) {
 	return user.ID, nil
 }
 
+func DeleteUser(id string) error {
+	conn := ConnectDB("codeforge")
+	tag, err := conn.Exec(
+		context.Background(),
+		"UPDATE auth.users SET active=false WHERE id=$1 AND active=true",
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+func UpdateUser(user types.User) error {
+	conn := ConnectDB("codeforge")
+	tag, err := conn.Exec(
+		context.Background(),
+		"UPDATE auth.users SET username=$1, email=$2, updated_at=$3 WHERE id=$4 AND active=true",
+		user.Username, user.Email, user.UpdatedAt, user.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
 func AuthUser(Username string, Password string) (string, error) {
 	var err error
 

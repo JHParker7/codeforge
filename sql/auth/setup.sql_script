@@ -27,6 +27,7 @@ CREATE TABLE auth.roles (
 	id varchar(64) NOT NULL,
 	created_at timestamp NULL,
 	updated_at timestamp NULL,
+  "permissions" json NULL,
 	CONSTRAINT roles_pkey PRIMARY KEY (id)
 );
 

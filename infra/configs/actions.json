@@ -1,0 +1,9 @@
+{
+  "actions_to_endpoint": [
+    { "action": "GetUser", "endpoint": "/user/", "method": "GET" },
+    { "action": "ListUsers", "endpoint": "/users", "method": "GET" },
+    { "action": "DeleteUser", "endpoint": "/user/", "method": "DELETE" },
+    { "action": "EditUser", "endpoint": "/user/", "method": "PUT" },
+    { "action": "GetRole", "endpoint": "/role/", "method": "GET" }
+  ]
+}

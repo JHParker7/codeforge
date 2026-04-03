@@ -1,78 +1,204 @@
 import asyncio
 import pymongo
 import pytest
+import fastapi
 
 db = {}
 
 
 @pytest.fixture()
 def gatekeeper(monkeypatch):
-    class MockClient:
-        def __init__(self, conn) -> None:
-            self.path = []
+    class MockTable:
+        def __init__(self, name) -> None:
+            if name not in db:
+                db[name] = []
+            self.name = name
 
         def insert_one(self, input: dict):
-            db[".".join(self.path)].append(input)
+            db[self.name].append(input)
 
         def find_one(self, query=None):
             if not query:
-                return db[".".join(self.path)][0]
+                return db[self.name][0]
             if query:
-                data = db[".".join(self.path)]
-                filted_data = []
-                for x in data:
-                    filted_data = []
-                    for key, data in query.items():
-                        if x[key] == data:
-                            filted_data.append(x)
-                    data = filted_data
+                filted_data = db[self.name]
+                for key, value in query.items():
+                    temp = []
+                    # print(f"{key}={value}")
+                    for x in filted_data:
+                        if x[key] == value:
+                            temp.append(x)
+                    filted_data = temp
                 if len(filted_data) != 0:
                     return filted_data[0]
                 else:
                     return []
 
-        def __getitem__(self, item):
-            self.path.append(item)
-            db[".".join(self.path)] = []
+    class MockClient:
+        def __init__(self, conn) -> None:
+            pass
 
-            return self
+        def __getitem__(self, item):
+            return MockDB()
+
+    class MockDB:
+        def __getitem__(self, item):
+            return MockTable(item)
 
     monkeypatch.setattr(pymongo, "MongoClient", MockClient)
     import src.gatekeeper.main as gatekeeper
 
     yield gatekeeper
 
-    del gatekeeper
-
 
 def test_new_user(gatekeeper):
+    global db
+    db = {}
     result = gatekeeper.register("test", "mr test", "test@test.com", "test")
     result = dict(asyncio.run(result))
+    result["role_id"] = None
     assert {
         "username": "test",
         "email": "test@test.com",
         "full_name": "mr test",
+        "role_id": None,
         "disabled": False,
     } == result
+    role = db["roles"][0]
+    role["role_id"] = None
+    role["gatekeeper"]["services"][1] = None
+    assert role == {
+        "role_id": None,
+        "gatekeeper": {
+            "services": ["user/test", None],
+            "actions": ["GetUser", "DeleteUser", "ListUsers", "EditUser", "GetRole"],
+        },
+    }
 
 
 def test_duplicate_user(gatekeeper):
     global db
     db = {}
+    result = gatekeeper.register("test", "mr test", "test@test.com", "test")
+    result = dict(asyncio.run(result))
+    result["role_id"] = None
+    assert {
+        "username": "test",
+        "email": "test@test.com",
+        "full_name": "mr test",
+        "role_id": None,
+        "disabled": False,
+    } == result
+    with pytest.raises(
+        fastapi.exceptions.HTTPException, match=r".*409: user already exists.*"
+    ):
+        result = gatekeeper.register("test", "mr test", "test@test.com", "test")
+        result = dict(asyncio.run(result))
 
+
+def test_get_token(gatekeeper):
+    global db
+    db = {}
     result = gatekeeper.register("test", "mr test", "test@test.com", "test")
     result = dict(asyncio.run(result))
-    assert {
+
+    class Token:
+        def __init__(self) -> None:
+            self.username = "test"
+            self.password = "test"
+
+    tokenInput = Token()
+    result = gatekeeper.login_for_access_token(tokenInput)
+    result = dict(asyncio.run(result))
+    print(result)
+    assert result["token_type"] == "bearer"
+    token = result["access_token"]
+    assert isinstance(token, str)
+    print(len(token))
+    assert len(token) == 187
+
+
+def test_get_token_wrong_creds(gatekeeper):
+    global db
+    db = {}
+    result = gatekeeper.register("test", "mr test", "test@test.com", "test")
+    result = dict(asyncio.run(result))
+
+    class Token:
+        def __init__(self, username, password) -> None:
+            self.username = username
+            self.password = password
+
+    tokenInput = Token("test", "test1")
+    with pytest.raises(
+        fastapi.exceptions.HTTPException,
+        match=r".*401: Incorrect username or password.*",
+    ):
+        result = gatekeeper.login_for_access_token(tokenInput)
+        result = dict(asyncio.run(result))
+    tokenInput = Token("test1", "test")
+    with pytest.raises(
+        fastapi.exceptions.HTTPException,
+        match=r".*401: Incorrect username or password.*",
+    ):
+        result = gatekeeper.login_for_access_token(tokenInput)
+        result = dict(asyncio.run(result))
+    tokenInput = Token("test1", None)
+    with pytest.raises(
+        TypeError,
+        match=r"password must be str or bytes",
+    ):
+        result = gatekeeper.login_for_access_token(tokenInput)
+        result = dict(asyncio.run(result))
+    tokenInput = Token("test1", 1)
+    with pytest.raises(
+        TypeError,
+        match=r"password must be str or bytes",
+    ):
+        result = gatekeeper.login_for_access_token(tokenInput)
+        result = dict(asyncio.run(result))
+
+
+def test_get_current_user(gatekeeper):
+    global db
+    db = {}
+    result = gatekeeper.register("test", "mr test", "test@test.com", "test")
+    result = dict(asyncio.run(result))
+
+    class Token:
+        def __init__(self) -> None:
+            self.username = "test"
+            self.password = "test"
+
+    tokenInput = Token()
+    result = gatekeeper.login_for_access_token(tokenInput)
+    result = dict(asyncio.run(result))
+    print(result)
+    assert result["token_type"] == "bearer"
+    token = result["access_token"]
+    assert isinstance(token, str)
+    print(len(token))
+    assert len(token) == 187
+    result = gatekeeper.get_current_user(token)
+    result = dict(asyncio.run(result))
+    print(result)
+    result["role_id"] = None
+    assert result == {
         "username": "test",
         "email": "test@test.com",
         "full_name": "mr test",
+        "role_id": None,
         "disabled": False,
-    } == result
+    }
+
+
+def test_check_role_for_access(gatekeeper):
+    global db
+    db = {}
     result = gatekeeper.register("test", "mr test", "test@test.com", "test")
     result = dict(asyncio.run(result))
-    assert {
-        "username": "test",
-        "email": "test@test.com",
-        "full_name": "mr test",
-        "disabled": False,
-    } == result
+
+    result = gatekeeper.check_role_for_access("GetUser", gatekeeper.User(**result))
+    result = dict(asyncio.run(result))
+    print(result)
+    assert False

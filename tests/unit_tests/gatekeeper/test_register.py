@@ -17,11 +17,21 @@ def setup(monkeypatch):
 
         def insert_one(self, input: dict):
             db[self.name].append(input)
+            db[self.name].append(input)
 
         def find_one(self, query=None):
             if not query:
                 return db[self.name][0]
+                return db[self.name][0]
             if query:
+                filted_data = db[self.name]
+                for key, value in query.items():
+                    temp = []
+                    # print(f"{key}={value}")
+                    for x in filted_data:
+                        if x[key] == value:
+                            temp.append(x)
+                    filted_data = temp
                 filted_data = db[self.name]
                 for key, value in query.items():
                     temp = []
@@ -40,6 +50,7 @@ def setup(monkeypatch):
             pass
 
         def __getitem__(self, item):
+            return MockDB()
             return MockDB()
 
     class MockDB:

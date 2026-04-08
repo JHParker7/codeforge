@@ -21,6 +21,9 @@ db = mongo_client["gatekeeper"]
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # to get a string like this run:
 # openssl rand -hex 32
 SECRET_KEY = os.environ.get(
@@ -368,6 +371,8 @@ async def register(
             status_code=status.HTTP_409_CONFLICT,
             detail="user already exists",
         )
+    db["users"].insert_one(new_user)
+    db["roles"].insert_one(new_role)
     db["users"].insert_one(new_user)
     db["roles"].insert_one(new_role)
     user = get_user(username)

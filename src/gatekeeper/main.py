@@ -1,8 +1,8 @@
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 import uuid
 import logging
-
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status, Form, Request
@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 import pymongo
 
-mongo_client = pymongo.MongoClient("mongodb://test:test@localhost:27017/")
+MONGODB_URL = os.environ.get("MONGODB_URL", "mongodb://test:test@localhost:27017/")
+mongo_client = pymongo.MongoClient(MONGODB_URL)
 
 db = mongo_client["gatekeeper"]
 
@@ -22,7 +23,10 @@ logging.basicConfig(level=logging.INFO)
 
 # to get a string like this run:
 # openssl rand -hex 32
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7",
+)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -151,19 +155,19 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
-    """_summary_
+    """validates the jwt token and returns the associated user
 
     Args:
-        token (Annotated[str, Depends): _description_
+        token (Annotated[str, Depends): the Bearer jwt token from the request
 
     Raises:
-        credentials_exception: _description_
-        credentials_exception: _description_
-        credentials_exception: _description_
-        credentials_exception: _description_
+        credentials_exception: raised if the token cannot be decoded
+        credentials_exception: raised if the token has no subject claim
+        credentials_exception: raised if no active session exists for the token
+        credentials_exception: raised if the user from the token no longer exists
 
     Returns:
-        User: _description_
+        User: the user associated with the validated token
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -181,15 +185,14 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
     session = db["sessions"].find_one(
         {"token": token, "username": token_data.username, "type": "jwt"}
     )
-    if session:
-        user = get_user(username=token_data.username)
-        if user is None:
-            raise credentials_exception
-        user = user.model_dump()
-        del user["hashed_password"]
-        return User(**user)
-    else:
+    if not session:
         raise credentials_exception
+    user = get_user(username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    user_data = user.model_dump()
+    del user_data["hashed_password"]
+    return User(**user_data)
 
 
 async def get_role(id: str) -> Role:
@@ -227,9 +230,9 @@ async def get_current_active_user(
 async def check_role_for_access(token: str, action: str, resource: str) -> bool:
     """WIP"""
     user = await get_current_user(token)
-    print(user)
+    logger.debug("check_role_for_access user: %s", user)
     role = await get_role(user.role_id)
-    print(role)
+    logger.debug("check_role_for_access role: %s", role)
 
 
 @app.middleware("/gatekeeper")
@@ -238,23 +241,20 @@ async def authenticate(request: Request, call_next):
     if "Authorization" not in request.headers or request.url.path == "/token":
         response = await call_next(request)
         return response
-    logger.info(request.url.path)
-    logger.info(request.method)
+    logger.info("path: %s", request.url.path)
+    logger.info("method: %s", request.method)
     user = await get_current_user(request.headers["Authorization"][7:])
     role = db["roles"].find_one({"role_id": user.role_id})
-    print(role)
-    print(str(request.url.path).split("/"))
+    logger.debug("role: %s", role)
+    logger.debug("path parts: %s", str(request.url.path).split("/"))
     result = db["actions"].find(
         {
             "method": request.method,
             "endpoint": {"$in": str(request.url.path).split("/")},
         }
     )
-    actions_needed = []
-    for x in result:
-        actions_needed.append(x["action"])
-    actions_needed = set(actions_needed)
-    print(actions_needed)
+    actions_needed = {x["action"] for x in result}
+    logger.debug("actions needed: %s", actions_needed)
 
     response = await call_next(request)
     return response
@@ -312,7 +312,7 @@ async def read_users_me(
     Returns:
         User: the currently log in users details
     """
-    return User(**current_user)
+    return current_user
 
 
 @app.post("/register")
@@ -376,12 +376,11 @@ async def register(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="user creation failed",
         )
-    user = user.model_dump()
-    return User(**user)
+    return User(**user.model_dump())
 
 
 @app.get("/gatekeeper/user")
-def getUser(current_user: Annotated[User, Depends(get_current_active_user)]):
+def get_user_endpoint(current_user: Annotated[User, Depends(get_current_active_user)]):
     return {}
 
 

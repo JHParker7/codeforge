@@ -28,15 +28,22 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 
 class Token(BaseModel):
+    """Oauth2 token."""
+
     access_token: str
     token_type: str
 
 
 class TokenData(BaseModel):
+    """Data in the jwt token"""
+
     username: str | None = None
 
 
 class User(BaseModel):
+    """store user details"""
+
+    user_id: str
     username: str
     email: str | None = None
     full_name: str | None = None
@@ -44,7 +51,16 @@ class User(BaseModel):
     disabled: bool | None = None
 
 
+class Role(BaseModel):
+    """constains the permissions of the users or services"""
+
+    role_id: str
+    permissions: dict
+
+
 class UserInDB(User):
+    """used to add the hashed_password to the user"""
+
     hashed_password: str
 
 
@@ -58,24 +74,53 @@ app = FastAPI()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    "compare hashed password stored in db to one from user"
+    """compares the password given by the client to the password in the database
+
+    Args:
+        plain_password (str): unhashed password from the user
+        hashed_password (str): hashed password from the database
+
+    Returns:
+        bool: is true if the password matches
+    """
     return password_hash.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    "hashed the password from the user"
+    """hashes the password
+
+    Args:
+        password (str): plain text password
+
+    Returns:
+        str: hashed password
+    """
     return password_hash.hash(password)
 
 
 def get_user(username: str | None) -> UserInDB | None:
-    "gets the user from the database based on the username"
+    """get the user from the database and returns it
+
+    Args:
+        username (str | None): the username of the user to get from the database
+    Returns:
+        UserInDB | None: the user as it is in the database with password hash
+    """
     user = db["users"].find_one({"username": username})
     if user:
         return UserInDB(**user)
 
 
 def authenticate_user(username: str, password: str) -> User | bool:
-    "check the creds from the user to those in the db"
+    """compare creds to those in the database
+
+    Args:
+        username (str): username of the user
+        password (str): password to check against the database
+
+    Returns:
+        User | bool: confirms if the creds are correct
+    """
     user = get_user(username)
     if not user:
         verify_password(password, DUMMY_HASH)
@@ -86,7 +131,15 @@ def authenticate_user(username: str, password: str) -> User | bool:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    "creates the jwt token"
+    """generates the access token
+
+    Args:
+        data (dict): data to encode into the jwt
+        expires_delta (timedelta | None, optional): time for the jwt to expire. Defaults to None.
+
+    Returns:
+        str: the jwt
+    """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -98,7 +151,20 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
-    "gets the current user based on the jwt"
+    """_summary_
+
+    Args:
+        token (Annotated[str, Depends): _description_
+
+    Raises:
+        credentials_exception: _description_
+        credentials_exception: _description_
+        credentials_exception: _description_
+        credentials_exception: _description_
+
+    Returns:
+        User: _description_
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -126,17 +192,49 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
         raise credentials_exception
 
 
+async def get_role(id: str) -> Role:
+    """get the role from the database based on its id and puts it into a Role object
+
+    Args:
+        id (str): id of the role to get
+
+    Returns:
+        Role: a Role object that contains the permissions of a role
+    """
+    role = db["roles"].find_one({"role_id": id})
+    return Role(**role)
+
+
 async def get_current_active_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    "checks if current user is active"
+    """checks if the user is currently active
+
+    Args:
+        current_user (Annotated[User, Depends): a user to check
+
+    Raises:
+        HTTPException: raised if the user is inactive
+
+    Returns:
+        User: a confirmed active user
+    """
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
+async def check_role_for_access(token: str, action: str, resource: str) -> bool:
+    """WIP"""
+    user = await get_current_user(token)
+    print(user)
+    role = await get_role(user.role_id)
+    print(role)
+
+
 @app.middleware("/gatekeeper")
-async def check_role_for_access(request: Request, call_next):
+async def authenticate(request: Request, call_next):
+    """WIP"""
     if "Authorization" not in request.headers or request.url.path == "/token":
         response = await call_next(request)
         return response
@@ -166,7 +264,17 @@ async def check_role_for_access(request: Request, call_next):
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
-    "compare the creds in db to the ones from the user if a match create a jwt and create a copy in the db then respond with the new jwt"
+    """checks password and username and returns a token if matches database creds
+
+    Args:
+        form_data (Annotated[OAuth2PasswordRequestForm, Depends): the user and password details to log in with
+
+    Raises:
+        HTTPException: raised if the username or password do not match the database
+
+    Returns:
+        Token: a new jwt token
+    """
     user = authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -192,10 +300,18 @@ async def login_for_access_token(
     return Token(access_token=access_token, token_type="bearer")
 
 
-@app.get("/users/me")
+@app.get("/me")
 async def read_users_me(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
+    """returns the details of the currently logged in user
+
+    Args:
+        current_user (Annotated[User, Depends): json of the current user details
+
+    Returns:
+        User: the currently log in users details
+    """
     return User(**current_user)
 
 
@@ -206,7 +322,21 @@ async def register(
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ) -> User:
-    "signup a user"
+    """post request to register a user
+
+    Args:
+        username (Annotated[str, Form): username of new user
+        full_name (Annotated[str, Form): fullname of new user
+        email (Annotated[str, Form): email of new user
+        password (Annotated[str, Form): password of new user
+
+    Raises:
+        HTTPException: raised if user already exists
+        HTTPException: the user creation failed
+
+    Returns:
+        User: new user details
+    """
     user_id = str(uuid.uuid7())
     role_id = str(uuid.uuid7())
     new_user = {
@@ -220,9 +350,17 @@ async def register(
     }
     new_role = {
         "role_id": role_id,
-        "gatekeeper": {
-            "services": [f"user/{username}", f"role/{role_id}"],
-            "actions": ["GetUser", "DeleteUser", "ListUsers", "EditUser", "GetRole"],
+        "permissions": {
+            "gatekeeper": {
+                "services": [f"user/{username}", f"role/{role_id}"],
+                "actions": [
+                    "GetUser",
+                    "DeleteUser",
+                    "ListUsers",
+                    "EditUser",
+                    "GetRole",
+                ],
+            }
         },
     }
     if db["users"].find_one({"username": username}):

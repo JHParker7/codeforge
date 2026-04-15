@@ -245,8 +245,36 @@ def test_check_role_for_access(setup):
     result = dict(asyncio.run(result))
     token = result["access_token"]
     result = gatekeeper.check_role_for_access(
-        token=token, action="GetUser", resource=id
+        token=token, action="GetUser", resource=f"gatekeeper/user/{id}"
     )
+    result = asyncio.run(result)
+    print(result)
+    assert result
+
+
+def test_check_role_for_access_denied(setup):
+    # setup
+    gatekeeper, client = setup
+    global db
+    db = {}
+    result = gatekeeper.register("test", "mr test", "test@test.com", "test")
     result = dict(asyncio.run(result))
     print(result)
-    assert False
+    # id = result["user_id"]
+
+    # get token
+    class Token:
+        def __init__(self, username, password) -> None:
+            self.username = username
+            self.password = password
+
+    tokenInput = Token("test", "test")
+    result = gatekeeper.login_for_access_token(tokenInput)
+    result = dict(asyncio.run(result))
+    token = result["access_token"]
+    result = gatekeeper.check_role_for_access(
+        token=token, action="GetUser", resource="gatekeeper/user/awdjioawdhjkoawd"
+    )
+    result = asyncio.run(result)
+    print(result)
+    assert not result

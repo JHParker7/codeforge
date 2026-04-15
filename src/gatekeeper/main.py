@@ -236,6 +236,18 @@ async def check_role_for_access(token: str, action: str, resource: str) -> bool:
     logger.debug("check_role_for_access user: %s", user)
     role = await get_role(user.role_id)
     logger.debug("check_role_for_access role: %s", role)
+    resource = resource.split("/")
+    system = resource.pop(0)
+    resource = "/".join(resource)
+    system_permissions = role.permissions[system]
+    logger.debug(system_permissions)
+    if (
+        resource in system_permissions["services"]
+        and action in system_permissions["actions"]
+    ):
+        return True
+    else:
+        return False
 
 
 @app.middleware("/gatekeeper")
@@ -355,7 +367,7 @@ async def register(
         "role_id": role_id,
         "permissions": {
             "gatekeeper": {
-                "services": [f"user/{username}", f"role/{role_id}"],
+                "services": [f"user/{user_id}", f"role/{role_id}"],
                 "actions": [
                     "GetUser",
                     "DeleteUser",

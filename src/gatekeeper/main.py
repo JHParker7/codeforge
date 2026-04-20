@@ -1,8 +1,8 @@
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 import uuid
 import logging
-
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status, Form, Request
@@ -10,33 +10,48 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 from pydantic import BaseModel
+import uvicorn
 
 import pymongo
 
-mongo_client = pymongo.MongoClient("mongodb://test:test@localhost:27017/")
+MONGODB_URL = os.environ.get("MONGODB_URL", "mongodb://test:test@localhost:27017/")
+mongo_client = pymongo.MongoClient(MONGODB_URL)
 
 db = mongo_client["gatekeeper"]
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # to get a string like this run:
 # openssl rand -hex 32
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7",
+)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 
 class Token(BaseModel):
+    """Oauth2 token."""
+
     access_token: str
     token_type: str
 
 
 class TokenData(BaseModel):
+    """Data in the jwt token"""
+
     username: str | None = None
 
 
 class User(BaseModel):
+    """store user details"""
+
+    user_id: str
     username: str
     email: str | None = None
     full_name: str | None = None
@@ -44,7 +59,16 @@ class User(BaseModel):
     disabled: bool | None = None
 
 
+class Role(BaseModel):
+    """constains the permissions of the users or services"""
+
+    role_id: str
+    permissions: dict
+
+
 class UserInDB(User):
+    """used to add the hashed_password to the user"""
+
     hashed_password: str
 
 
@@ -58,24 +82,53 @@ app = FastAPI()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    "compare hashed password stored in db to one from user"
+    """compares the password given by the client to the password in the database
+
+    Args:
+        plain_password (str): unhashed password from the user
+        hashed_password (str): hashed password from the database
+
+    Returns:
+        bool: is true if the password matches
+    """
     return password_hash.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    "hashed the password from the user"
+    """hashes the password
+
+    Args:
+        password (str): plain text password
+
+    Returns:
+        str: hashed password
+    """
     return password_hash.hash(password)
 
 
 def get_user(username: str | None) -> UserInDB | None:
-    "gets the user from the database based on the username"
+    """get the user from the database and returns it
+
+    Args:
+        username (str | None): the username of the user to get from the database
+    Returns:
+        UserInDB | None: the user as it is in the database with password hash
+    """
     user = db["users"].find_one({"username": username})
     if user:
         return UserInDB(**user)
 
 
 def authenticate_user(username: str, password: str) -> User | bool:
-    "check the creds from the user to those in the db"
+    """compare creds to those in the database
+
+    Args:
+        username (str): username of the user
+        password (str): password to check against the database
+
+    Returns:
+        User | bool: confirms if the creds are correct
+    """
     user = get_user(username)
     if not user:
         verify_password(password, DUMMY_HASH)
@@ -86,7 +139,15 @@ def authenticate_user(username: str, password: str) -> User | bool:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    "creates the jwt token"
+    """generates the access token
+
+    Args:
+        data (dict): data to encode into the jwt
+        expires_delta (timedelta | None, optional): time for the jwt to expire. Defaults to None.
+
+    Returns:
+        str: the jwt
+    """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -98,7 +159,20 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
-    "gets the current user based on the jwt"
+    """validates the jwt token and returns the associated user
+
+    Args:
+        token (Annotated[str, Depends): the Bearer jwt token from the request
+
+    Raises:
+        credentials_exception: raised if the token cannot be decoded
+        credentials_exception: raised if the token has no subject claim
+        credentials_exception: raised if no active session exists for the token
+        credentials_exception: raised if the user from the token no longer exists
+
+    Returns:
+        User: the user associated with the validated token
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -115,48 +189,88 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
     session = db["sessions"].find_one(
         {"token": token, "username": token_data.username, "type": "jwt"}
     )
-    if session:
-        user = get_user(username=token_data.username)
-        if user is None:
-            raise credentials_exception
-        user = user.model_dump()
-        del user["hashed_password"]
-        return User(**user)
-    else:
+    if not session:
         raise credentials_exception
+    user = get_user(username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    user_data = user.model_dump()
+    del user_data["hashed_password"]
+    return User(**user_data)
+
+
+async def get_role(id: str) -> Role:
+    """get the role from the database based on its id and puts it into a Role object
+
+    Args:
+        id (str): id of the role to get
+
+    Returns:
+        Role: a Role object that contains the permissions of a role
+    """
+    role = db["roles"].find_one({"role_id": id})
+    return Role(**role)
 
 
 async def get_current_active_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    "checks if current user is active"
+    """checks if the user is currently active
+
+    Args:
+        current_user (Annotated[User, Depends): a user to check
+
+    Raises:
+        HTTPException: raised if the user is inactive
+
+    Returns:
+        User: a confirmed active user
+    """
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
+async def check_role_for_access(token: str, action: str, resource: str) -> bool:
+    """WIP"""
+    user = await get_current_user(token)
+    logger.debug("check_role_for_access user: %s", user)
+    role = await get_role(user.role_id)
+    logger.debug("check_role_for_access role: %s", role)
+    resource = resource.split("/")
+    system = resource.pop(0)
+    resource = "/".join(resource)
+    system_permissions = role.permissions[system]
+    logger.debug(system_permissions)
+    if (
+        resource in system_permissions["services"]
+        and action in system_permissions["actions"]
+    ):
+        return True
+    else:
+        return False
+
+
 @app.middleware("/gatekeeper")
-async def check_role_for_access(request: Request, call_next):
+async def authenticate(request: Request, call_next):
+    """WIP"""
     if "Authorization" not in request.headers or request.url.path == "/token":
         response = await call_next(request)
         return response
-    logger.info(request.url.path)
-    logger.info(request.method)
+    logger.info("path: %s", request.url.path)
+    logger.info("method: %s", request.method)
     user = await get_current_user(request.headers["Authorization"][7:])
     role = db["roles"].find_one({"role_id": user.role_id})
-    print(role)
-    print(str(request.url.path).split("/"))
+    logger.debug("role: %s", role)
+    logger.debug("path parts: %s", str(request.url.path).split("/"))
     result = db["actions"].find(
         {
             "method": request.method,
             "endpoint": {"$in": str(request.url.path).split("/")},
         }
     )
-    actions_needed = []
-    for x in result:
-        actions_needed.append(x["action"])
-    actions_needed = set(actions_needed)
-    print(actions_needed)
+    actions_needed = {x["action"] for x in result}
+    logger.debug("actions needed: %s", actions_needed)
 
     response = await call_next(request)
     return response
@@ -166,7 +280,17 @@ async def check_role_for_access(request: Request, call_next):
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
-    "compare the creds in db to the ones from the user if a match create a jwt and create a copy in the db then respond with the new jwt"
+    """checks password and username and returns a token if matches database creds
+
+    Args:
+        form_data (Annotated[OAuth2PasswordRequestForm, Depends): the user and password details to log in with
+
+    Raises:
+        HTTPException: raised if the username or password do not match the database
+
+    Returns:
+        Token: a new jwt token
+    """
     user = authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -192,11 +316,19 @@ async def login_for_access_token(
     return Token(access_token=access_token, token_type="bearer")
 
 
-@app.get("/users/me")
+@app.get("/me")
 async def read_users_me(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    return User(**current_user)
+    """returns the details of the currently logged in user
+
+    Args:
+        current_user (Annotated[User, Depends): json of the current user details
+
+    Returns:
+        User: the currently log in users details
+    """
+    return current_user
 
 
 @app.post("/register")
@@ -206,7 +338,21 @@ async def register(
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ) -> User:
-    "signup a user"
+    """post request to register a user
+
+    Args:
+        username (Annotated[str, Form): username of new user
+        full_name (Annotated[str, Form): fullname of new user
+        email (Annotated[str, Form): email of new user
+        password (Annotated[str, Form): password of new user
+
+    Raises:
+        HTTPException: raised if user already exists
+        HTTPException: the user creation failed
+
+    Returns:
+        User: new user details
+    """
     user_id = str(uuid.uuid7())
     role_id = str(uuid.uuid7())
     new_user = {
@@ -220,9 +366,17 @@ async def register(
     }
     new_role = {
         "role_id": role_id,
-        "gatekeeper": {
-            "services": [f"user/{username}", f"role/{role_id}"],
-            "actions": ["GetUser", "DeleteUser", "ListUsers", "EditUser", "GetRole"],
+        "permissions": {
+            "gatekeeper": {
+                "services": [f"user/{user_id}", f"role/{role_id}"],
+                "actions": [
+                    "GetUser",
+                    "DeleteUser",
+                    "ListUsers",
+                    "EditUser",
+                    "GetRole",
+                ],
+            }
         },
     }
     if db["users"].find_one({"username": username}):
@@ -232,22 +386,24 @@ async def register(
         )
     db["users"].insert_one(new_user)
     db["roles"].insert_one(new_role)
+    db["users"].insert_one(new_user)
+    db["roles"].insert_one(new_role)
     user = get_user(username)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="user creation failed",
         )
-    user = user.model_dump()
-    return User(**user)
+    return User(**user.model_dump())
 
 
 @app.get("/gatekeeper/user")
-def getUser(current_user: Annotated[User, Depends(get_current_active_user)]):
+def get_user_endpoint(current_user: Annotated[User, Depends(get_current_active_user)]):
     return {}
 
 
-# if __name__ == "main":
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8081)
 #     config = {
 #         "actions_to_endpoint": [
 #             {"action": "GetUser", "endpoint": "user", "method": "GET"},

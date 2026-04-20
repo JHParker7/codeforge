@@ -83,11 +83,14 @@ def test_new_user(setup):
     role = db["roles"][0]
     role["role_id"] = None
     role["permissions"]["gatekeeper"]["services"][1] = None
+    role["permissions"]["gatekeeper"]["services"][0] = (
+        role["permissions"]["gatekeeper"]["services"][0].split("/")[0] + "/"
+    )
     assert role == {
         "role_id": None,
         "permissions": {
             "gatekeeper": {
-                "services": ["user/test", None],
+                "services": ["user/", None],
                 "actions": [
                     "GetUser",
                     "DeleteUser",

@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 from pydantic import BaseModel
+import uvicorn
 
 import pymongo
 
@@ -401,7 +402,8 @@ def get_user_endpoint(current_user: Annotated[User, Depends(get_current_active_u
     return {}
 
 
-# if __name__ == "main":
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8081)
 #     config = {
 #         "actions_to_endpoint": [
 #             {"action": "GetUser", "endpoint": "user", "method": "GET"},
